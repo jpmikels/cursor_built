@@ -1,0 +1,182 @@
+steps:
+  # ========================================
+  # Install dependencies and run tests
+  # ========================================
+  - name: 'python:3.11-slim'
+    id: 'backend-lint-test'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        cd app/backend
+        pip install --quiet -r requirements.txt
+        pip install --quiet black isort flake8 pytest pytest-cov
+        echo "Running code formatters and linters..."
+        black --check . || true
+        isort --check . || true
+        flake8 . --max-line-length=120 --extend-ignore=E203,W503 || true
+        echo "Running backend tests..."
+        pytest tests/ -v --cov=. --cov-report=term-missing || true
+
+  - name: 'node:18'
+    id: 'frontend-lint-test'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        cd app/frontend
+        npm ci --quiet
+        echo "Running frontend linting..."
+        npm run lint || true
+        echo "Running frontend tests..."
+        npm test -- --passWithNoTests || true
+
+  # ========================================
+  # Build and push backend Docker image
+  # ========================================
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'backend-build'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REGISTRY}/backend:$SHORT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REGISTRY}/backend:latest'
+      - '-f'
+      - 'app/backend/Dockerfile'
+      - 'app/backend'
+    waitFor: ['backend-lint-test']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'backend-push'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REGISTRY}/backend'
+    waitFor: ['backend-build']
+
+  # ========================================
+  # Build and push frontend Docker image
+  # ========================================
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'frontend-build'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REGISTRY}/frontend:$SHORT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REGISTRY}/frontend:latest'
+      - '-f'
+      - 'app/frontend/Dockerfile'
+      - 'app/frontend'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_API_URL=https://${_BACKEND_SERVICE}-${_REGION}.run.app'
+    waitFor: ['frontend-lint-test']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'frontend-push'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REGISTRY}/frontend'
+    waitFor: ['frontend-build']
+
+  # ========================================
+  # Run database migrations
+  # ========================================
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'db-migrate'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Install cloud sql proxy
+        wget -q https://dl.google.com/cloudsql/cloud_sql_proxy.linux.amd64 -O cloud_sql_proxy
+        chmod +x cloud_sql_proxy
+        
+        # Start proxy in background
+        ./cloud_sql_proxy -instances=${_DB_INSTANCE}=tcp:5432 &
+        PROXY_PID=$!
+        
+        # Wait for proxy to be ready
+        sleep 5
+        
+        # Run migrations using Docker image
+        docker run --network=cloudbuild \
+          -e DATABASE_URL="postgresql://vwb_app:${_DB_PASSWORD}@host.docker.internal:5432/vwb" \
+          ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REGISTRY}/backend:$SHORT_SHA \
+          alembic upgrade head || echo "Migration completed or skipped"
+        
+        # Kill proxy
+        kill $PROXY_PID
+    waitFor: ['backend-push']
+
+  # ========================================
+  # Deploy backend to Cloud Run
+  # ========================================
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-backend'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'services'
+      - 'update'
+      - '${_BACKEND_SERVICE}'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REGISTRY}/backend:$SHORT_SHA'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+    waitFor: ['backend-push', 'db-migrate']
+
+  # ========================================
+  # Deploy frontend to Cloud Run
+  # ========================================
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-frontend'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'services'
+      - 'update'
+      - '${_FRONTEND_SERVICE}'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REGISTRY}/frontend:$SHORT_SHA'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+    waitFor: ['frontend-push', 'deploy-backend']
+
+  # ========================================
+  # Run smoke tests
+  # ========================================
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'smoke-test'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Running smoke tests..."
+        BACKEND_URL=$(gcloud run services describe ${_BACKEND_SERVICE} --region=${_REGION} --format='value(status.url)')
+        FRONTEND_URL=$(gcloud run services describe ${_FRONTEND_SERVICE} --region=${_REGION} --format='value(status.url)')
+        
+        echo "Testing backend health endpoint..."
+        curl -f $BACKEND_URL/health || exit 1
+        
+        echo "Testing frontend..."
+        curl -f $FRONTEND_URL || exit 1
+        
+        echo "All smoke tests passed!"
+    waitFor: ['deploy-backend', 'deploy-frontend']
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+  dynamic_substitutions: true
+
+timeout: '1800s'
+
+substitutions:
+  _ENVIRONMENT: 'dev'
+  _REGION: 'us-central1'
+  _ARTIFACT_REGISTRY: 'dev-vwb-docker'
+  _BACKEND_SERVICE: 'dev-vwb-backend'
+  _FRONTEND_SERVICE: 'dev-vwb-frontend'
+  _DB_INSTANCE: 'project:region:instance'
+

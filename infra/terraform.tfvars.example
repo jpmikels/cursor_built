@@ -1,0 +1,14 @@
+project_id   = "your-gcp-project-id"
+environment  = "dev"
+region       = "us-central1"
+github_repo  = "your-org/vwb"
+alert_email  = "alerts@example.com"
+
+# Optional overrides
+# db_tier                  = "db-custom-2-7680"
+# db_disk_size             = 50
+# backend_max_instances    = 10
+# frontend_max_instances   = 5
+# uploads_retention_days   = 365
+# artifacts_retention_days = 730
+
