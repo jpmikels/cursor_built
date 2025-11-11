@@ -1,0 +1,76 @@
+# cloudbuild.yaml
+substitutions:
+  _REGION: "us-central1"
+  _REPO: "vwb"
+  _PROJECT: "$PROJECT_ID"
+  _BACKEND_DIR: "app/backend"
+  _FRONTEND_DIR: "app/frontend"
+  _BACKEND_SERVICE: "vwb-backend"
+  _FRONTEND_SERVICE: "vwb-frontend"
+  _RUNTIME_SA: "vwb-runner@${PROJECT_ID}.iam.gserviceaccount.com"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  # Backend image
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"
+      - "-f"
+      - "${_BACKEND_DIR}/Dockerfile.backend"
+      - "${_BACKEND_DIR}"
+
+  # Frontend image
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"
+      - "-f"
+      - "${_FRONTEND_DIR}/Dockerfile.frontend"
+      - "${_FRONTEND_DIR}"
+
+  # Push images
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"]
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"]
+
+  # Deploy backend
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_BACKEND_SERVICE}
+      - "--image=${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"
+      - "--region=${_REGION}"
+      - "--platform=managed"
+      - "--allow-unauthenticated"
+      - "--cpu=1"
+      - "--memory=1Gi"
+      - "--max-instances=5"
+      - "--service-account=${_RUNTIME_SA}"
+
+  # Deploy frontend
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_FRONTEND_SERVICE}
+      - "--image=${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"
+      - "--region=${_REGION}"
+      - "--platform=managed"
+      - "--allow-unauthenticated"
+      - "--cpu=1"
+      - "--memory=512Mi"
+      - "--max-instances=10"
+      - "--service-account=${_RUNTIME_SA}"
+
+images:
+  - "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"
+  - "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"
