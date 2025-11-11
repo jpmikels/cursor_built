@@ -20,7 +20,7 @@ steps:
       - "-t"
       - "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"
       - "-f"
-      - "${_BACKEND_DIR}/Dockerfile.backend"
+      - "${_BACKEND_DIR}/Dockerfile"          # <— changed from Dockerfile.backend
       - "${_BACKEND_DIR}"
 
   # Frontend image
@@ -30,7 +30,7 @@ steps:
       - "-t"
       - "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"
       - "-f"
-      - "${_FRONTEND_DIR}/Dockerfile.frontend"
+      - "${_FRONTEND_DIR}/Dockerfile"         # <— changed from Dockerfile.frontend
       - "${_FRONTEND_DIR}"
 
   # Push images
