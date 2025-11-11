@@ -1,6 +1,6 @@
 # cloudbuild.yaml
 substitutions:
-  _REGION: "us-central1"
+  _REGION: "europe-west1"
   _REPO: "vwb"
   _PROJECT: "$PROJECT_ID"
   _BACKEND_DIR: "app/backend"
