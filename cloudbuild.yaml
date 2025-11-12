@@ -23,20 +23,21 @@ steps:
       - "${_BACKEND_DIR}/Dockerfile"
       - "${_BACKEND_DIR}"
 
-  # ---------- Frontend image (inject backend URL at build time) ----------
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        BACKEND_URL="$(gcloud run services describe ${_BACKEND_SERVICE} --region ${_REGION} --format='value(status.url)' || true)"
-        echo "Using backend URL: ${BACKEND_URL}"
-        docker build \
-          -t "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA" \
-          -f "${_FRONTEND_DIR}/Dockerfile" \
-          --build-arg NEXT_PUBLIC_API_URL="${BACKEND_URL}" \
-          "${_FRONTEND_DIR}"
+  # ---------- Frontend image (build with backend URL) ----------
+- name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  entrypoint: bash
+  args:
+    - -c
+    - |
+      set -euo pipefail
+      BACKEND_URL="$(gcloud run services describe ${_BACKEND_SERVICE} \
+        --region ${_REGION} --format='value(status.url)' || true)"
+      echo "Using backend URL: ${BACKEND_URL}"
+      docker build \
+        -t "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA" \
+        -f "${_FRONTEND_DIR}/Dockerfile" \
+        --build-arg NEXT_PUBLIC_API_URL="${BACKEND_URL}" \
+        "${_FRONTEND_DIR}"
 
   # ---------- Push images ----------
   - name: gcr.io/cloud-builders/docker
@@ -44,7 +45,6 @@ steps:
   - name: gcr.io/cloud-builders/docker
     args: ["push", "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"]
 
-  # ---------- Deploy backend ----------
     # ---------- Deploy backend ----------
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
