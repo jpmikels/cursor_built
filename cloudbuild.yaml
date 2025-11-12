@@ -54,6 +54,7 @@ steps:
       - "--memory=1Gi"
       - "--max-instances=5"
       - "--service-account=${_RUNTIME_SA}"
+      - "--set-env-vars=PORT=8080,LOG_LEVEL=info"
 
   # Deploy frontend
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
