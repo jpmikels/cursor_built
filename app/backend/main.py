@@ -46,10 +46,21 @@ app = FastAPI(
     redoc_url="/redoc" if getattr(settings, "environment", "prod") != "prod" else None,
 )
 
-# ---------- CORS ----------
+# ---------- Configurable CORS ----------
+import os
+
+# Allow all by default, or restrict dynamically using an env var
+frontend_origin = os.getenv("FRONTEND_ORIGIN", "*")
+
+if frontend_origin == "*":
+    allowed_origins = ["*"]
+else:
+    # Support comma-separated list like: "https://frontend.app,https://admin.app"
+    allowed_origins = [origin.strip() for origin in frontend_origin.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten later
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
