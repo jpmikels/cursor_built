@@ -13,53 +13,56 @@ options:
   logging: CLOUD_LOGGING_ONLY
 
 steps:
-  # Backend image
+  # ---------- Backend image ----------
   - name: gcr.io/cloud-builders/docker
     args:
       - build
       - "-t"
       - "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"
       - "-f"
-      - "${_BACKEND_DIR}/Dockerfile"          # <— changed from Dockerfile.backend
+      - "${_BACKEND_DIR}/Dockerfile"
       - "${_BACKEND_DIR}"
 
-  # Frontend image
-  - name: gcr.io/cloud-builders/docker
+  # ---------- Frontend image (inject backend URL at build time) ----------
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
     args:
-      - build
-      - "-t"
-      - "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"
-      - "-f"
-      - "${_FRONTEND_DIR}/Dockerfile"         # <— changed from Dockerfile.frontend
-      - "${_FRONTEND_DIR}"
+      - -c
+      - |
+        set -euo pipefail
+        BACKEND_URL="$(gcloud run services describe ${_BACKEND_SERVICE} --region ${_REGION} --format='value(status.url)' || true)"
+        echo "Using backend URL: ${BACKEND_URL}"
+        docker build \
+          -t "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA" \
+          -f "${_FRONTEND_DIR}/Dockerfile" \
+          --build-arg NEXT_PUBLIC_API_URL="${BACKEND_URL}" \
+          "${_FRONTEND_DIR}"
 
-  # Push images
+  # ---------- Push images ----------
   - name: gcr.io/cloud-builders/docker
     args: ["push", "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"]
   - name: gcr.io/cloud-builders/docker
     args: ["push", "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"]
 
-  # Deploy backend
- - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-  entrypoint: gcloud
-  args:
-    - run
-    - deploy
-    - ${_BACKEND_SERVICE}
-    - "--image=${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"
-    - "--region=${_REGION}"
-    - "--platform=managed"
-    - "--allow-unauthenticated"
-    - "--cpu=1"
-    - "--memory=1Gi"
-    - "--max-instances=5"
-    - "--service-account=${_RUNTIME_SA}"
-    - "--timeout=600"
-    - "--set-env-vars=LOG_LEVEL=info,ENVIRONMENT=prod,DATABASE_URL=sqlite:///./vwb.sqlite3"
-    - "--timeout=600"
+  # ---------- Deploy backend ----------
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_BACKEND_SERVICE}
+      - "--image=${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"
+      - "--region=${_REGION}"
+      - "--platform=managed"
+      - "--allow-unauthenticated"
+      - "--cpu=1"
+      - "--memory=1Gi"
+      - "--max-instances=5"
+      - "--service-account=${_RUNTIME_SA}"
+      - "--timeout=600"
+      - "--set-env-vars=LOG_LEVEL=info,ENVIRONMENT=prod,DATABASE_URL=sqlite:///./vwb.sqlite3"
 
-
-  # Deploy frontend
+  # ---------- Deploy frontend ----------
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
