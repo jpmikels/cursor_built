@@ -26,8 +26,11 @@ async def lifespan(app: FastAPI):
     
     # Create database tables (in production, use Alembic migrations)
     if settings.environment == "dev":
+    try:
         logger.info("Creating database tables...")
         Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        logger.warning(f"Skipping DB create_all at startup: {e}")
     
     yield
     
