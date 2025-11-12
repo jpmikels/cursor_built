@@ -1,118 +1,78 @@
-"""FastAPI application entry point."""
+# app/backend/main.py
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import settings
-from database import engine, Base
-from api.v1 import router as api_v1_router
+from database import Base, get_engine  # lazy engine
+# If you have versioned APIs, keep this; else remove.
+# from api.vi import router as api_v1_router
 
-# Configure logging
+# ---------- logging ----------
 logging.basicConfig(
-    level=getattr(logging, settings.log_level),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=getattr(logging, getattr(settings, "log_level", "INFO").upper()),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("vwb-backend")
 
-
+# ---------- lifespan: non-blocking startup/shutdown ----------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan events."""
-    # Startup
-    logger.info(f"Starting {settings.app_name} in {settings.environment} environment")
-    logger.info(f"Project ID: {settings.project_id}")
-    
-    # Create database tables (in production, use Alembic migrations)
-    if settings.environment == "dev":
-    try:
-        logger.info("Creating database tables...")
-        Base.metadata.create_all(bind=engine)
-    except Exception as e:
-        logger.warning(f"Skipping DB create_all at startup: {e}")
-    
+    logger.info("Starting %s (env=%s)", getattr(settings, "app_name", "VWB"), getattr(settings, "environment", "unknown"))
+
+    # Only create tables in dev, and never block startup if DB is missing.
+    if getattr(settings, "environment", "prod") == "dev":
+        try:
+            logger.info("Creating database tables (dev only)…")
+            Base.metadata.create_all(bind=get_engine())
+            logger.info("DB create_all complete.")
+        except Exception as e:
+            logger.warning("Skipping DB create_all at startup: %s", e)
+
     yield
-    
-    # Shutdown
+
     logger.info("Shutting down application")
 
-
-# Create FastAPI app
+# ---------- app ----------
 app = FastAPI(
-    title=settings.app_name,
-    description="Production-grade financial statement consolidation and business valuation platform",
+    title=getattr(settings, "app_name", "Valuation Workbench"),
+    description="Production-grade financial statement consolidation and valuation API",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs" if settings.environment != "prod" else None,
-    redoc_url="/redoc" if settings.environment != "prod" else None,
+    docs_url="/docs" if getattr(settings, "environment", "prod") != "prod" else None,
+    redoc_url="/redoc" if getattr(settings, "environment", "prod") != "prod" else None,
 )
 
-# CORS middleware
+# ---------- CORS ----------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
+    allow_origins=["*"],   # tighten later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include API routers
-app.include_router(api_v1_router, prefix="/api/v1")
-
-
-# Health check endpoints
+# ---------- routes ----------
 @app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "vwb-backend"}
-
+def health():
+    return {"ok": True}
 
 @app.get("/ready")
-async def readiness_check():
-    """Readiness check endpoint."""
-    # TODO: Add database connectivity check
-    return {"status": "ready", "service": "vwb-backend"}
-
+def ready():
+    return {"ready": True}
 
 @app.get("/")
-async def root():
-    """Root endpoint."""
-    return {
-        "service": settings.app_name,
-        "version": "1.0.0",
-        "environment": settings.environment,
-        "docs": "/docs" if settings.environment != "prod" else "disabled"
-    }
+def root():
+    return {"service": "vwb-backend", "status": "running"}
 
+# If you have API routers, include them here
+# app.include_router(api_v1_router, prefix="/api/v1")
 
-# Global exception handler
+# Example error handler (optional)
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """Global exception handler for unhandled errors."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": "Internal server error",
-            "error": str(exc) if settings.environment == "dev" else "An unexpected error occurred"
-        }
-    )
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8080,
-        reload=settings.environment == "dev",
-        log_level=settings.log_level.lower()
-    )
-
-@app.get("/health")
-def health(): return {"ok": True}
-
-@app.get("/ready")
-def ready(): return {"ready": True}
-
+async def unhandled_exc(_, exc: Exception):
+    logger.exception("Unhandled exception: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
