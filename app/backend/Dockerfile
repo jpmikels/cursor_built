@@ -6,12 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps (WeasyPrint/Cairo stack + Postgres client headers)
+# System deps (WeasyPrint/Cairo stack + Postgres headers + curl for optional healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
     g++ \
     git \
+    curl \
     libpq-dev \
     libcairo2 \
     libpango-1.0-0 \
@@ -33,13 +34,9 @@ COPY . .
 RUN useradd -m -u 1000 vwb && chown -R vwb:vwb /app
 USER vwb
 
-# Cloud Run port
-ENV PORT=8080
-EXPOSE 8080
-
-# Healthcheck (avoid importing requests in case it isn't installed yet)
+# (Optional) container-level healthcheck; Cloud Run doesn't require it
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-  CMD /usr/bin/curl -f http://localhost:8080/health || exit 1
+  CMD curl -fsS "http://127.0.0.1:${PORT:-8080}/health" || exit 1
 
-# Start FastAPI (adjust if your entrypoint changes)
+# Start FastAPI (bind to Cloud Run's injected $PORT)
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 2"]
