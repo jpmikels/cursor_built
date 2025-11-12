@@ -108,13 +108,8 @@ if __name__ == "__main__":
     )
 
 @app.get("/health")
-def health():
-    return {"ok": True}
+def health(): return {"ok": True}
 
 @app.get("/ready")
-def ready():
-    return {"ready": True}
+def ready(): return {"ready": True}
 
-@app.get("/")
-def root():
-    return {"service": "vwb-backend", "status": "running"}
