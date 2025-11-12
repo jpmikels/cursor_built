@@ -13,7 +13,6 @@ options:
   logging: CLOUD_LOGGING_ONLY
 
 steps:
-  # ---------- Backend image ----------
   - name: gcr.io/cloud-builders/docker
     args:
       - build
@@ -23,29 +22,30 @@ steps:
       - "${_BACKEND_DIR}/Dockerfile"
       - "${_BACKEND_DIR}"
 
-  # ---------- Frontend image (build with backend URL) ----------
-- name: gcr.io/google.com/cloudsdktool/cloud-sdk
-  entrypoint: bash
-  args:
-    - -c
-    - |
-      set -euo pipefail
-      BACKEND_URL="$(gcloud run services describe ${_BACKEND_SERVICE} \
-        --region ${_REGION} --format='value(status.url)' || true)"
-      echo "Using backend URL: ${BACKEND_URL}"
-      docker build \
-        -t "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA" \
-        -f "${_FRONTEND_DIR}/Dockerfile" \
-        --build-arg NEXT_PUBLIC_API_URL="${BACKEND_URL}" \
-        "${_FRONTEND_DIR}"
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        BACKEND_URL="$(gcloud run services describe ${_BACKEND_SERVICE} --region ${_REGION} --format='value(status.url)' || true)"
+        echo "Using backend URL: ${BACKEND_URL}"
+        docker build \
+          -t "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA" \
+          -f "${_FRONTEND_DIR}/Dockerfile" \
+          --build-arg NEXT_PUBLIC_API_URL="${BACKEND_URL}" \
+          "${_FRONTEND_DIR}"
 
-  # ---------- Push images ----------
   - name: gcr.io/cloud-builders/docker
-    args: ["push", "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"]
-  - name: gcr.io/cloud-builders/docker
-    args: ["push", "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"]
+    args:
+      - push
+      - "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA"
 
-    # ---------- Deploy backend ----------
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - "${_REGION}-docker.pkg.dev/${_PROJECT}/${_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA"
+
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
@@ -61,9 +61,8 @@ steps:
       - "--max-instances=5"
       - "--service-account=${_RUNTIME_SA}"
       - "--timeout=600"
-      - "--set-env-vars=LOG_LEVEL=info,ENVIRONMENT=prod,DATABASE_URL=sqlite:///./vwb.sqlite3,FRONTEND_ORIGIN=https://your-frontend-url"
+      - "--set-env-vars=LOG_LEVEL=info,ENVIRONMENT=prod,DATABASE_URL=sqlite:///./vwb.sqlite3,FRONTEND_ORIGIN=*"
 
-  # ---------- Deploy frontend ----------
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
