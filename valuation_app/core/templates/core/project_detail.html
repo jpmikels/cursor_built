@@ -1,0 +1,158 @@
+{% extends 'core/base.html' %}
+
+{% block title %}{{ project.name }} - Business Valuation{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1>{{ project.name }}</h1>
+        <p class="text-muted">{{ project.client_name|default:"No client specified" }}</p>
+    </div>
+    <div class="col-auto">
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">Back to Dashboard</a>
+    </div>
+</div>
+
+<!-- Project Status Card -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-3">
+                <h6 class="text-muted mb-2">Status</h6>
+                {% if project.status == 'NEW' %}
+                    <span class="badge bg-secondary fs-6">{{ project.get_status_display }}</span>
+                {% elif project.status == 'PROCESSING' %}
+                    <span class="badge bg-info fs-6">{{ project.get_status_display }}</span>
+                {% elif project.status == 'READY' %}
+                    <span class="badge bg-warning fs-6">{{ project.get_status_display }}</span>
+                {% elif project.status == 'CALCULATING' %}
+                    <span class="badge bg-primary fs-6">{{ project.get_status_display }}</span>
+                {% elif project.status == 'COMPLETE' %}
+                    <span class="badge bg-success fs-6">{{ project.get_status_display }}</span>
+                {% elif project.status == 'ERROR' %}
+                    <span class="badge bg-danger fs-6">{{ project.get_status_display }}</span>
+                {% endif %}
+            </div>
+            <div class="col-md-3">
+                <h6 class="text-muted mb-2">Created</h6>
+                <p class="mb-0">{{ project.created_at|date:"Y-m-d H:i" }}</p>
+            </div>
+            <div class="col-md-3">
+                <h6 class="text-muted mb-2">Currency</h6>
+                <p class="mb-0">{{ project.currency }}</p>
+            </div>
+            <div class="col-md-3">
+                <h6 class="text-muted mb-2">Data Points</h6>
+                <p class="mb-0">{{ financial_data_count }}</p>
+            </div>
+        </div>
+        
+        {% if project.error_message %}
+            <div class="alert alert-danger mt-3 mb-0">
+                <strong>Error:</strong> {{ project.error_message }}
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Actions Card -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Actions</h5>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            {% if project.status == 'READY' %}
+                <div class="col-md-4">
+                    <a href="{% url 'assumptions_input' project.id %}" class="btn btn-success w-100">
+                        Set Assumptions & Calculate
+                    </a>
+                </div>
+            {% endif %}
+            
+            {% if project.status == 'COMPLETE' %}
+                <div class="col-md-4">
+                    <a href="{% url 'results_dashboard' project.id %}" class="btn btn-success w-100">
+                        View Results
+                    </a>
+                </div>
+                <div class="col-md-4">
+                    <a href="{% url 'download_excel' project.id %}" class="btn btn-primary w-100">
+                        Download Excel Report
+                    </a>
+                </div>
+                <div class="col-md-4">
+                    <a href="{% url 'assumptions_input' project.id %}" class="btn btn-outline-primary w-100">
+                        Modify Assumptions
+                    </a>
+                </div>
+            {% endif %}
+            
+            <div class="col-md-4">
+                <a href="{% url 'financial_data' project.id %}" class="btn btn-outline-secondary w-100">
+                    View Financial Data
+                </a>
+            </div>
+            
+            <div class="col-md-4">
+                <a href="{% url 'delete_project' project.id %}" class="btn btn-outline-danger w-100">
+                    Delete Project
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Financial Data Summary -->
+{% if metrics %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Financial Data Summary</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <h6>Metrics Available ({{ metrics|length }})</h6>
+                    <ul class="list-unstyled">
+                        {% for metric in metrics|slice:":10" %}
+                            <li>• {{ metric }}</li>
+                        {% endfor %}
+                        {% if metrics|length > 10 %}
+                            <li class="text-muted">... and {{ metrics|length|add:"-10" }} more</li>
+                        {% endif %}
+                    </ul>
+                </div>
+                <div class="col-md-6">
+                    <h6>Years Available ({{ years|length }})</h6>
+                    <p>{{ years|join:", " }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endif %}
+
+<!-- Results Summary (if available) -->
+{% if results %}
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">Valuation Results Summary</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4">
+                    <h6 class="text-muted">DCF Equity Value</h6>
+                    <h4>${{ results.dcf_equity_value|floatformat:0|default:"N/A" }}</h4>
+                </div>
+                <div class="col-md-4">
+                    <h6 class="text-muted">CCA Equity Value (Median)</h6>
+                    <h4>${{ results.cca_equity_value_median|floatformat:0|default:"N/A" }}</h4>
+                </div>
+                <div class="col-md-4">
+                    <h6 class="text-muted">Concluded Value</h6>
+                    <h4 class="text-success">${{ results.concluded_equity_value|floatformat:0|default:"N/A" }}</h4>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endif %}
+{% endblock %}
