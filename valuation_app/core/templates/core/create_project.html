@@ -1,0 +1,101 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Create Project - Business Valuation{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-8 mx-auto">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="mb-0">Create New Project</h3>
+            </div>
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    
+                    <div class="mb-3">
+                        <label for="{{ form.name.id_for_label }}" class="form-label">Project Name *</label>
+                        {{ form.name }}
+                        {% if form.name.errors %}
+                            <div class="text-danger">{{ form.name.errors }}</div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="{{ form.client_name.id_for_label }}" class="form-label">Client Name</label>
+                        {{ form.client_name }}
+                        {% if form.client_name.errors %}
+                            <div class="text-danger">{{ form.client_name.errors }}</div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="{{ form.description.id_for_label }}" class="form-label">Description</label>
+                        {{ form.description }}
+                        {% if form.description.errors %}
+                            <div class="text-danger">{{ form.description.errors }}</div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="{{ form.uploaded_file.id_for_label }}" class="form-label">Financial Data File * (.xlsx, .xls, .csv)</label>
+                        {{ form.uploaded_file }}
+                        <div class="form-text">Upload an Excel or CSV file with historical financial data</div>
+                        {% if form.uploaded_file.errors %}
+                            <div class="text-danger">{{ form.uploaded_file.errors }}</div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="{{ form.fiscal_year_end.id_for_label }}" class="form-label">Fiscal Year End</label>
+                            {{ form.fiscal_year_end }}
+                            <div class="form-text">e.g., 12-31</div>
+                            {% if form.fiscal_year_end.errors %}
+                                <div class="text-danger">{{ form.fiscal_year_end.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="{{ form.currency.id_for_label }}" class="form-label">Currency</label>
+                            {{ form.currency }}
+                            {% if form.currency.errors %}
+                                <div class="text-danger">{{ form.currency.errors }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="{{ form.industry_code.id_for_label }}" class="form-label">Industry Code</label>
+                        {{ form.industry_code }}
+                        <div class="form-text">SIC or NAICS code (optional)</div>
+                        {% if form.industry_code.errors %}
+                            <div class="text-danger">{{ form.industry_code.errors }}</div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <a href="{% url 'dashboard' %}" class="btn btn-secondary">Cancel</a>
+                        <button type="submit" class="btn btn-primary">Create Project</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">File Format Guide</h5>
+            </div>
+            <div class="card-body">
+                <p>Your financial data file should be formatted with:</p>
+                <ul>
+                    <li>First column: Metric names (Revenue, COGS, EBITDA, etc.)</li>
+                    <li>Subsequent columns: Years (2020, 2021, 2022, etc.)</li>
+                    <li>Each row represents one financial metric</li>
+                </ul>
+                <p class="mb-0 text-muted">The system will automatically detect and parse the data structure.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,159 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Results - {{ project.name }}{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1>Valuation Results</h1>
+        <p class="text-muted">Project: {{ project.name }}</p>
+    </div>
+    <div class="col-auto">
+        <a href="{% url 'download_excel' project.id %}" class="btn btn-primary">Download Excel Report</a>
+        <a href="{% url 'project_detail' project.id %}" class="btn btn-outline-secondary">Back to Project</a>
+    </div>
+</div>
+
+<!-- Executive Summary -->
+<div class="card mb-4">
+    <div class="card-header bg-success text-white">
+        <h4 class="mb-0">Executive Summary</h4>
+    </div>
+    <div class="card-body">
+        <div class="row text-center">
+            <div class="col-md-4">
+                <h6 class="text-muted text-uppercase">DCF Equity Value</h6>
+                <h2 class="text-primary">${{ results.dcf_equity_value|floatformat:0|default:"N/A" }}</h2>
+            </div>
+            <div class="col-md-4">
+                <h6 class="text-muted text-uppercase">CCA Equity Value (Median)</h6>
+                <h2 class="text-primary">${{ results.cca_equity_value_median|floatformat:0|default:"N/A" }}</h2>
+            </div>
+            <div class="col-md-4">
+                <h6 class="text-muted text-uppercase">Concluded Value</h6>
+                <h2 class="text-success">${{ results.concluded_equity_value|floatformat:0|default:"N/A" }}</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- DCF Results -->
+    <div class="col-md-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0">DCF Analysis</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tbody>
+                        <tr>
+                            <td>PV of Forecast FCF</td>
+                            <td class="text-end">${{ results.dcf_pv_forecast_fcf|floatformat:0|default:"N/A" }}</td>
+                        </tr>
+                        <tr>
+                            <td>PV of Terminal Value</td>
+                            <td class="text-end">${{ results.dcf_pv_terminal_value|floatformat:0|default:"N/A" }}</td>
+                        </tr>
+                        <tr class="table-primary">
+                            <td><strong>Enterprise Value</strong></td>
+                            <td class="text-end"><strong>${{ results.dcf_enterprise_value|floatformat:0|default:"N/A" }}</strong></td>
+                        </tr>
+                        <tr class="table-success">
+                            <td><strong>Equity Value</strong></td>
+                            <td class="text-end"><strong>${{ results.dcf_equity_value|floatformat:0|default:"N/A" }}</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <hr>
+                
+                <h6 class="mt-3">Key Assumptions</h6>
+                <table class="table table-sm">
+                    <tbody>
+                        <tr>
+                            <td>WACC</td>
+                            <td class="text-end">{{ results.wacc_used|floatformat:4|default:"N/A" }} ({{ results.wacc_used|floatformat:2 }}%)</td>
+                        </tr>
+                        <tr>
+                            <td>Terminal Growth Rate</td>
+                            <td class="text-end">{{ assumptions.terminal_growth_rate|floatformat:4 }} ({{ assumptions.terminal_growth_rate|floatformat:2 }}%)</td>
+                        </tr>
+                        <tr>
+                            <td>Forecast Years</td>
+                            <td class="text-end">{{ assumptions.forecast_years }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- CCA Results -->
+    <div class="col-md-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0">Comparable Company Analysis</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Multiple</th>
+                            <th class="text-end">Equity Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ assumptions.ebitda_multiple_min|floatformat:1 }}x (Min)</td>
+                            <td class="text-end">${{ results.cca_equity_value_min|floatformat:0|default:"N/A" }}</td>
+                        </tr>
+                        <tr class="table-primary">
+                            <td><strong>{{ assumptions.ebitda_multiple_median|floatformat:1 }}x (Median)</strong></td>
+                            <td class="text-end"><strong>${{ results.cca_equity_value_median|floatformat:0|default:"N/A" }}</strong></td>
+                        </tr>
+                        <tr>
+                            <td>{{ assumptions.ebitda_multiple_max|floatformat:1 }}x (Max)</td>
+                            <td class="text-end">${{ results.cca_equity_value_max|floatformat:0|default:"N/A" }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <hr>
+                
+                <h6 class="mt-3">Subject Company Data</h6>
+                {% if latest_ebitda %}
+                    <p class="mb-1">Latest EBITDA: <strong>${{ latest_ebitda|floatformat:0 }}</strong></p>
+                {% endif %}
+                {% if latest_revenue %}
+                    <p class="mb-0">Latest Revenue: <strong>${{ latest_revenue|floatformat:0 }}</strong></p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Actions -->
+<div class="card">
+    <div class="card-body">
+        <h5>Next Steps</h5>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <a href="{% url 'download_excel' project.id %}" class="btn btn-primary w-100">
+                    Download Detailed Report
+                </a>
+            </div>
+            <div class="col-md-4">
+                <a href="{% url 'assumptions_input' project.id %}" class="btn btn-outline-primary w-100">
+                    Modify Assumptions
+                </a>
+            </div>
+            <div class="col-md-4">
+                <a href="{% url 'financial_data' project.id %}" class="btn btn-outline-secondary w-100">
+                    View Financial Data
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

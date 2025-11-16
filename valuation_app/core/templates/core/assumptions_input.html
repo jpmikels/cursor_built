@@ -1,0 +1,224 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Set Assumptions - {{ project.name }}{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-10 mx-auto">
+        <div class="mb-4">
+            <h1>Valuation Assumptions</h1>
+            <p class="text-muted">Project: {{ project.name }}</p>
+        </div>
+        
+        <div class="card mb-4 bg-light">
+            <div class="card-body">
+                <h5>Calculated WACC</h5>
+                <h2 class="text-primary mb-0">{{ calculated_wacc|floatformat:4 }} ({{ calculated_wacc|floatformat:2 }}%)</h2>
+                <p class="text-muted mb-0 mt-2">This WACC will be used for DCF discounting</p>
+            </div>
+        </div>
+        
+        <form method="post">
+            {% csrf_token %}
+            
+            <!-- WACC Components -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">WACC Components</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Risk-Free Rate</label>
+                            {{ form.risk_free_rate }}
+                            <div class="form-text">{{ form.risk_free_rate.help_text }}</div>
+                            {% if form.risk_free_rate.errors %}
+                                <div class="text-danger">{{ form.risk_free_rate.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Equity Risk Premium</label>
+                            {{ form.equity_risk_premium }}
+                            <div class="form-text">{{ form.equity_risk_premium.help_text }}</div>
+                            {% if form.equity_risk_premium.errors %}
+                                <div class="text-danger">{{ form.equity_risk_premium.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Beta</label>
+                            {{ form.beta }}
+                            <div class="form-text">{{ form.beta.help_text }}</div>
+                            {% if form.beta.errors %}
+                                <div class="text-danger">{{ form.beta.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Size Premium</label>
+                            {{ form.size_premium }}
+                            <div class="form-text">{{ form.size_premium.help_text }}</div>
+                            {% if form.size_premium.errors %}
+                                <div class="text-danger">{{ form.size_premium.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Company-Specific Premium</label>
+                            {{ form.company_specific_premium }}
+                            <div class="form-text">{{ form.company_specific_premium.help_text }}</div>
+                            {% if form.company_specific_premium.errors %}
+                                <div class="text-danger">{{ form.company_specific_premium.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Cost of Debt</label>
+                            {{ form.cost_of_debt }}
+                            <div class="form-text">{{ form.cost_of_debt.help_text }}</div>
+                            {% if form.cost_of_debt.errors %}
+                                <div class="text-danger">{{ form.cost_of_debt.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-12 mb-3">
+                            <label class="form-label">Tax Rate</label>
+                            {{ form.tax_rate }}
+                            <div class="form-text">{{ form.tax_rate.help_text }}</div>
+                            {% if form.tax_rate.errors %}
+                                <div class="text-danger">{{ form.tax_rate.errors }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Capital Structure -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Capital Structure</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Debt Weight</label>
+                            {{ form.debt_weight }}
+                            <div class="form-text">{{ form.debt_weight.help_text }}</div>
+                            {% if form.debt_weight.errors %}
+                                <div class="text-danger">{{ form.debt_weight.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Equity Weight</label>
+                            {{ form.equity_weight }}
+                            <div class="form-text">{{ form.equity_weight.help_text }}</div>
+                            {% if form.equity_weight.errors %}
+                                <div class="text-danger">{{ form.equity_weight.errors }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- DCF Assumptions -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">DCF Assumptions</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Terminal Growth Rate</label>
+                            {{ form.terminal_growth_rate }}
+                            <div class="form-text">{{ form.terminal_growth_rate.help_text }}</div>
+                            {% if form.terminal_growth_rate.errors %}
+                                <div class="text-danger">{{ form.terminal_growth_rate.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Revenue Growth Rate</label>
+                            {{ form.revenue_growth_rate }}
+                            <div class="form-text">{{ form.revenue_growth_rate.help_text }}</div>
+                            {% if form.revenue_growth_rate.errors %}
+                                <div class="text-danger">{{ form.revenue_growth_rate.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Forecast Years</label>
+                            {{ form.forecast_years }}
+                            <div class="form-text">{{ form.forecast_years.help_text }}</div>
+                            {% if form.forecast_years.errors %}
+                                <div class="text-danger">{{ form.forecast_years.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <div class="form-check mt-4">
+                                {{ form.mid_year_convention }}
+                                <label class="form-check-label" for="{{ form.mid_year_convention.id_for_label }}">
+                                    Use Mid-Year Convention
+                                </label>
+                            </div>
+                            <div class="form-text">{{ form.mid_year_convention.help_text }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- CCA Assumptions -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Comparable Company Analysis</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">EBITDA Multiple (Min)</label>
+                            {{ form.ebitda_multiple_min }}
+                            <div class="form-text">{{ form.ebitda_multiple_min.help_text }}</div>
+                            {% if form.ebitda_multiple_min.errors %}
+                                <div class="text-danger">{{ form.ebitda_multiple_min.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">EBITDA Multiple (Median)</label>
+                            {{ form.ebitda_multiple_median }}
+                            <div class="form-text">{{ form.ebitda_multiple_median.help_text }}</div>
+                            {% if form.ebitda_multiple_median.errors %}
+                                <div class="text-danger">{{ form.ebitda_multiple_median.errors }}</div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">EBITDA Multiple (Max)</label>
+                            {{ form.ebitda_multiple_max }}
+                            <div class="form-text">{{ form.ebitda_multiple_max.help_text }}</div>
+                            {% if form.ebitda_multiple_max.errors %}
+                                <div class="text-danger">{{ form.ebitda_multiple_max.errors }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Form Errors -->
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger">
+                    {{ form.non_field_errors }}
+                </div>
+            {% endif %}
+            
+            <!-- Submit Buttons -->
+            <div class="d-flex justify-content-between">
+                <a href="{% url 'project_detail' project.id %}" class="btn btn-secondary">Cancel</a>
+                <button type="submit" class="btn btn-success btn-lg">Save & Calculate Valuation</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
