@@ -1,0 +1,162 @@
+name: Deploy to Production
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to deploy'
+        required: true
+        type: string
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID_PROD }}
+  REGION: us-central1
+  ENVIRONMENT: prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    
+    permissions:
+      contents: read
+      id-token: write
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.version || github.event.release.tag_name }}
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER_PROD }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT_PROD }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+      
+      - name: Build and Push Backend
+        run: |
+          VERSION=${{ github.event.inputs.version || github.event.release.tag_name }}
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/prod-vwb-docker/backend:${VERSION} \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/prod-vwb-docker/backend:latest \
+            app/backend
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/prod-vwb-docker/backend:${VERSION}
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/prod-vwb-docker/backend:latest
+      
+      - name: Build and Push Frontend
+        run: |
+          VERSION=${{ github.event.inputs.version || github.event.release.tag_name }}
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/prod-vwb-docker/frontend:${VERSION} \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/prod-vwb-docker/frontend:latest \
+            --build-arg NEXT_PUBLIC_API_URL=${{ secrets.PROD_API_URL }} \
+            app/frontend
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/prod-vwb-docker/frontend:${VERSION}
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/prod-vwb-docker/frontend:latest
+      
+      - name: Backup Database
+        run: |
+          echo "Creating database backup before deployment..."
+          gcloud sql backups create \
+            --instance=prod-vwb-db \
+            --description="Pre-deployment backup $(date +%Y%m%d-%H%M%S)"
+      
+      - name: Run Database Migrations
+        run: |
+          VERSION=${{ github.event.inputs.version || github.event.release.tag_name }}
+          docker run --rm \
+            -v $PWD/app/backend:/app \
+            -e DATABASE_URL=${{ secrets.PROD_DATABASE_URL }} \
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/prod-vwb-docker/backend:${VERSION} \
+            alembic upgrade head
+      
+      - name: Deploy Backend with Traffic Split
+        run: |
+          VERSION=${{ github.event.inputs.version || github.event.release.tag_name }}
+          
+          # Deploy new revision with 0% traffic
+          gcloud run deploy prod-vwb-backend \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/prod-vwb-docker/backend:${VERSION} \
+            --platform=managed \
+            --region=${{ env.REGION }} \
+            --no-traffic \
+            --tag=canary \
+            --min-instances=1 \
+            --max-instances=100 \
+            --memory=2Gi \
+            --cpu=2 \
+            --timeout=600
+          
+          # Test canary
+          CANARY_URL=$(gcloud run services describe prod-vwb-backend --region=${{ env.REGION }} --format="value(status.traffic[0].url)")
+          curl -f $CANARY_URL/health || exit 1
+          
+          # Gradually shift traffic: 10%, 50%, 100%
+          echo "Shifting 10% traffic to canary..."
+          gcloud run services update-traffic prod-vwb-backend \
+            --region=${{ env.REGION }} \
+            --to-revisions=LATEST=10
+          
+          sleep 300  # Wait 5 minutes
+          
+          echo "Shifting 50% traffic to canary..."
+          gcloud run services update-traffic prod-vwb-backend \
+            --region=${{ env.REGION }} \
+            --to-revisions=LATEST=50
+          
+          sleep 300  # Wait 5 minutes
+          
+          echo "Shifting 100% traffic to new version..."
+          gcloud run services update-traffic prod-vwb-backend \
+            --region=${{ env.REGION }} \
+            --to-latest
+      
+      - name: Deploy Frontend
+        run: |
+          VERSION=${{ github.event.inputs.version || github.event.release.tag_name }}
+          gcloud run deploy prod-vwb-frontend \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/prod-vwb-docker/frontend:${VERSION} \
+            --platform=managed \
+            --region=${{ env.REGION }} \
+            --min-instances=1 \
+            --max-instances=50 \
+            --memory=512Mi \
+            --cpu=1
+      
+      - name: Run Integration Tests
+        run: |
+          BACKEND_URL=$(gcloud run services describe prod-vwb-backend --region=${{ env.REGION }} --format="value(status.url)")
+          echo "Running integration tests against: $BACKEND_URL"
+          
+          # Add comprehensive tests here
+          curl -f $BACKEND_URL/health || exit 1
+          curl -f $BACKEND_URL/ready || exit 1
+      
+      - name: Notify Deployment
+        if: success()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          text: '🚀 Production deployment successful!'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+      
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          echo "Deployment failed! Rolling back..."
+          gcloud run services update-traffic prod-vwb-backend \
+            --region=${{ env.REGION }} \
+            --to-revisions=LATEST=0
+          
+          # Notify team
+          echo "❌ Deployment failed and rolled back" | \
+            curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"❌ Production deployment FAILED and rolled back\"}" \
+            ${{ secrets.SLACK_WEBHOOK }}
