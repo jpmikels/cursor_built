@@ -79,8 +79,23 @@ def ready():
 def root():
     return {"service": "vwb-backend", "status": "running"}
 
-# If you have API routers, include them here
-# app.include_router(api_v1_router, prefix="/api/v1")
+# Include API routers
+try:
+    from api.v1 import auth, engagements, documents, validation, valuation
+    from api.v1 import files, mappings, chat, workbook
+    
+    app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
+    app.include_router(engagements.router, prefix="/api/v1/engagements", tags=["engagements"])
+    app.include_router(documents.router, prefix="/api/v1", tags=["documents"])
+    app.include_router(validation.router, prefix="/api/v1", tags=["validation"])
+    app.include_router(valuation.router, prefix="/api/v1", tags=["valuation"])
+    app.include_router(files.router, prefix="/api/v1", tags=["files"])
+    app.include_router(mappings.router, prefix="/api/v1", tags=["mappings"])
+    app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
+    app.include_router(workbook.router, prefix="/api/v1", tags=["workbook"])
+    logger.info("All API routers loaded successfully")
+except ImportError as e:
+    logger.warning(f"Some API routes not available: {e}")
 
 # Example error handler (optional)
 @app.exception_handler(Exception)

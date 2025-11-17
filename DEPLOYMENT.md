@@ -1,435 +1,499 @@
 # Valuation Workbench - Deployment Guide
 
-## Overview
+This guide covers deploying the Valuation Workbench (VWB) to Google Cloud Platform.
 
-This guide walks through deploying the complete Valuation Workbench (VWB) application to Google Cloud Platform.
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Infrastructure Setup](#infrastructure-setup)
+- [Environment Configuration](#environment-configuration)
+- [Deployment](#deployment)
+- [Post-Deployment](#post-deployment)
+- [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
 
-1. **GCP Account**: Active billing account with sufficient quota
-2. **CLI Tools**:
+### Required Tools
+
+1. **Google Cloud SDK**
    ```bash
-   # Google Cloud SDK
-   gcloud components update
-   
-   # Terraform
-   brew install terraform  # macOS
-   # or download from terraform.io
-   
-   # Node.js & npm
-   node --version  # Should be 18+
-   npm --version
-   
-   # Python
-   python --version  # Should be 3.11+
+   # Install gcloud CLI
+   curl https://sdk.cloud.google.com | bash
+   exec -l $SHELL
+   gcloud init
    ```
 
-3. **Permissions**: Owner or Editor role on GCP project
+2. **Terraform** (>= 1.5)
+   ```bash
+   # macOS
+   brew install terraform
+   
+   # Linux
+   wget https://releases.hashicorp.com/terraform/1.5.0/terraform_1.5.0_linux_amd64.zip
+   unzip terraform_1.5.0_linux_amd64.zip
+   sudo mv terraform /usr/local/bin/
+   ```
 
-## Step 1: GCP Project Setup
+3. **Docker**
+   ```bash
+   # macOS
+   brew install docker
+   
+   # Linux
+   curl -fsSL https://get.docker.com -o get-docker.sh
+   sudo sh get-docker.sh
+   ```
+
+### GCP Project Setup
+
+1. **Create GCP Project**
+   ```bash
+   export PROJECT_ID="your-project-id"
+   export REGION="us-central1"
+   
+   gcloud projects create $PROJECT_ID
+   gcloud config set project $PROJECT_ID
+   ```
+
+2. **Enable Billing**
+   - Go to [GCP Console](https://console.cloud.google.com/)
+   - Link a billing account to your project
+
+3. **Set Up Authentication**
+   ```bash
+   gcloud auth application-default login
+   ```
+
+## Infrastructure Setup
+
+### 1. Create Terraform State Bucket
 
 ```bash
-# Set variables
-export PROJECT_ID="your-gcp-project-id"
-export REGION="us-central1"
-export ENVIRONMENT="dev"
+export PROJECT_ID="your-project-id"
+export TF_STATE_BUCKET="${PROJECT_ID}-terraform-state"
 
-# Set active project
-gcloud config set project $PROJECT_ID
-
-# Enable required APIs (this may take a few minutes)
-gcloud services enable \
-  cloudresourcemanager.googleapis.com \
-  serviceusage.googleapis.com \
-  cloudbuild.googleapis.com \
-  run.googleapis.com \
-  sqladmin.googleapis.com \
-  bigquery.googleapis.com \
-  storage.googleapis.com \
-  pubsub.googleapis.com \
-  secretmanager.googleapis.com \
-  documentai.googleapis.com \
-  aiplatform.googleapis.com \
-  workflows.googleapis.com \
-  cloudtasks.googleapis.com \
-  artifactregistry.googleapis.com \
-  vpcaccess.googleapis.com \
-  compute.googleapis.com
-```
-
-## Step 2: Create Terraform State Bucket
-
-```bash
-# Create GCS bucket for Terraform state
-gsutil mb -p $PROJECT_ID -l $REGION gs://${PROJECT_ID}-terraform-state
+# Create bucket for Terraform state
+gsutil mb -p $PROJECT_ID -l $REGION gs://$TF_STATE_BUCKET
 
 # Enable versioning
-gsutil versioning set on gs://${PROJECT_ID}-terraform-state
+gsutil versioning set on gs://$TF_STATE_BUCKET
 ```
 
-## Step 3: Configure Document AI
+### 2. Configure Terraform Variables
 
-```bash
-# Create Document AI processor
-gcloud alpha documentai processors create \
-  --location=us \
-  --display-name="VWB Form Parser" \
-  --type=FORM_PARSER_PROCESSOR
+Create `infra/terraform.tfvars`:
 
-# Note the processor ID for terraform variables
+```hcl
+project_id    = "your-project-id"
+region        = "us-central1"
+environment   = "dev"  # or "staging" / "prod"
+github_repo   = "your-org/your-repo"
+alert_email   = "alerts@yourcompany.com"
+
+# Optional customizations
+db_tier                  = "db-f1-micro"  # or "db-n1-standard-2" for prod
+backend_max_instances    = 10
+frontend_max_instances   = 5
+uploads_retention_days   = 2555  # 7 years
+artifacts_retention_days = 365
 ```
 
-## Step 4: Deploy Infrastructure with Terraform
+### 3. Deploy Infrastructure
 
 ```bash
 cd infra
 
-# Copy and edit terraform variables
-cp terraform.tfvars.example terraform.tfvars
-
-# Edit terraform.tfvars with your values:
-# - project_id
-# - github_repo
-# - alert_email
-# - document_ai_processor_id (from step 3)
-
 # Initialize Terraform
-terraform init -backend-config="bucket=${PROJECT_ID}-terraform-state"
+terraform init -backend-config="bucket=${TF_STATE_BUCKET}"
 
-# Review plan
-terraform plan -var="project_id=$PROJECT_ID"
+# Review changes
+terraform plan -var-file="terraform.tfvars"
 
-# Apply infrastructure
-terraform apply -var="project_id=$PROJECT_ID"
-
-# Save outputs
-terraform output > ../terraform-outputs.txt
+# Apply changes
+terraform apply -var-file="terraform.tfvars"
 ```
 
-This will provision:
-- Cloud Storage buckets
-- BigQuery datasets
-- Cloud SQL PostgreSQL instance
-- Cloud Run services (placeholders)
-- Pub/Sub topics
+This will create:
+- Cloud Run services (backend + frontend)
+- Cloud SQL PostgreSQL database
+- Cloud Storage buckets (uploads, artifacts)
+- BigQuery datasets (raw, curated, valuation)
+- Pub/Sub topics for async processing
 - Cloud Tasks queues
-- Secret Manager secrets
-- VPC & connector
+- VPC and networking
+- IAM service accounts and permissions
 - Artifact Registry
-- IAM service accounts
-- Monitoring & alerting
-- Workload Identity Federation for GitHub
+- Monitoring and alerting
 
-## Step 5: Configure Secrets
+**Note:** First deployment will fail for Cloud Run services because no images exist yet. This is expected.
 
-```bash
-# Get the Cloud SQL password from Terraform
-DB_PASSWORD=$(terraform output -raw db_password 2>/dev/null || echo "CHANGE_ME")
-
-# JWT secret is auto-generated, but you can rotate it
-JWT_SECRET=$(openssl rand -hex 32)
-echo -n "$JWT_SECRET" | gcloud secrets versions add vwb-jwt-secret --data-file=-
-
-# Add market data provider API keys (optional)
-# echo -n "YOUR_PITCHBOOK_KEY" | gcloud secrets create vwb-pitchbook-key --data-file=-
-# echo -n "YOUR_CAPIQ_KEY" | gcloud secrets create vwb-capiq-key --data-file=-
-```
-
-## Step 6: Set Up GitHub CI/CD
-
-### 6.1 Get Workload Identity Federation info
+### 4. Get Infrastructure Outputs
 
 ```bash
-# From Terraform outputs
-WIF_PROVIDER=$(terraform output -raw workload_identity_provider)
-WIF_SA=$(terraform output -raw cloudbuild_service_account)
+terraform output
 
-echo "Add these to GitHub repository secrets:"
-echo "GCP_PROJECT_ID: $PROJECT_ID"
-echo "GCP_WIF_PROVIDER: $WIF_PROVIDER"
-echo "GCP_WIF_SERVICE_ACCOUNT: $WIF_SA"
+# Save important values
+export BACKEND_URL=$(terraform output -raw backend_url)
+export FRONTEND_URL=$(terraform output -raw frontend_url)
+export DB_CONNECTION=$(terraform output -raw db_connection_name)
 ```
 
-### 6.2 Add secrets to GitHub
+## Environment Configuration
 
-1. Go to your GitHub repository
-2. Settings → Secrets and variables → Actions
-3. Add the three secrets above
-
-## Step 7: Initial Build & Deploy
-
-### Option A: Deploy via GitHub (Recommended)
+### 1. Set Up Document AI Processor
 
 ```bash
-# Push code to GitHub
-git init
-git add .
-git commit -m "Initial VWB deployment"
-git remote add origin https://github.com/YOUR_ORG/vwb.git
-git push -u origin main
+# Create Document AI processor
+gcloud alpha documentai processors create \
+  --display-name="VWB Financial Extractor" \
+  --type=FORM_PARSER_PROCESSOR \
+  --location=us
 
-# Cloud Build trigger will automatically build and deploy
+# Get processor ID
+PROCESSOR_ID=$(gcloud alpha documentai processors list \
+  --location=us \
+  --format="value(name)" | head -1)
+
+echo "Document AI Processor ID: $PROCESSOR_ID"
 ```
 
-### Option B: Manual Deploy (for testing)
+### 2. Configure Secrets
+
+Terraform creates empty secrets. Populate them:
 
 ```bash
-# Build backend
-cd app/backend
-gcloud builds submit --tag gcr.io/$PROJECT_ID/vwb-backend
+# JWT Secret (already populated by Terraform)
 
-# Deploy backend
-BACKEND_SERVICE=$(terraform output -raw backend_service_name)
-gcloud run deploy $BACKEND_SERVICE \
-  --image gcr.io/$PROJECT_ID/vwb-backend \
-  --region $REGION \
-  --platform managed
+# Database Password (already populated by Terraform)
 
-# Build frontend
-cd ../frontend
-BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region $REGION --format='value(status.url)')
-gcloud builds submit --tag gcr.io/$PROJECT_ID/vwb-frontend \
-  --build-arg NEXT_PUBLIC_API_URL=$BACKEND_URL
+# Optional: Market data provider API keys
+gcloud secrets versions add dev-vwb-pitchbook-key \
+  --data-file=- <<< "your-pitchbook-api-key"
 
-# Deploy frontend
-FRONTEND_SERVICE=$(terraform output -raw frontend_service_name)
-gcloud run deploy $FRONTEND_SERVICE \
-  --image gcr.io/$PROJECT_ID/vwb-frontend \
-  --region $REGION \
-  --platform managed
+gcloud secrets versions add dev-vwb-capiq-key \
+  --data-file=- <<< "your-capiq-api-key"
 ```
 
-## Step 8: Run Database Migrations
+## Deployment
 
-```bash
-cd app/backend
+### Option 1: GitHub Actions (Recommended)
 
-# Install Cloud SQL Proxy
-wget https://dl.google.com/cloudsql/cloud_sql_proxy.linux.amd64 -O cloud_sql_proxy
-chmod +x cloud_sql_proxy
+1. **Configure GitHub Secrets**
 
-# Get connection name
-CONNECTION_NAME=$(terraform output -raw db_connection_name)
+   Go to your repository settings → Secrets and add:
 
-# Start proxy in background
-./cloud_sql_proxy -instances=$CONNECTION_NAME=tcp:5432 &
-PROXY_PID=$!
-
-# Set database URL
-export DATABASE_URL="postgresql://vwb_app:$DB_PASSWORD@localhost:5432/vwb"
-
-# Run migrations
-alembic upgrade head
-
-# Stop proxy
-kill $PROXY_PID
-```
-
-## Step 9: Verify Deployment
-
-```bash
-# Get service URLs
-BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region $REGION --format='value(status.url)')
-FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE --region $REGION --format='value(status.url)')
-
-echo "Backend: $BACKEND_URL"
-echo "Frontend: $FRONTEND_URL"
-
-# Test backend health
-curl $BACKEND_URL/health
-
-# Test frontend
-curl $FRONTEND_URL
-
-# Access application
-open $FRONTEND_URL
-```
-
-## Step 10: Post-Deployment Configuration
-
-### Create First User
-
-1. Navigate to frontend URL
-2. Click "Get Started" or "Register"
-3. Fill in:
-   - Email
-   - Password
-   - Full Name
-   - Organization Name
-4. Sign in
-
-### Set Up Document AI Custom Processor (Optional)
-
-For better parsing accuracy, train a custom Document AI processor:
-
-1. Go to Document AI Console
-2. Create Custom Extractor
-3. Upload sample financial statements
-4. Label entities (Revenue, COGS, etc.)
-5. Train model
-6. Update processor ID in environment
-
-### Configure Market Data Providers (Optional)
-
-1. Obtain API credentials from:
-   - PitchBook
-   - Capital IQ
-   - DealStats
-   
-2. Add to Secret Manager:
-   ```bash
-   echo -n "YOUR_KEY" | gcloud secrets create vwb-provider-key --data-file=-
+   ```
+   GCP_PROJECT_ID:          your-project-id
+   GCP_PROJECT_ID_PROD:     your-prod-project-id (if different)
+   WIF_PROVIDER:            (from Terraform output)
+   WIF_SERVICE_ACCOUNT:     (from Terraform output)
+   WIF_PROVIDER_PROD:       (from Terraform output for prod)
+   WIF_SERVICE_ACCOUNT_PROD:(from Terraform output for prod)
+   STAGING_DATABASE_URL:    postgresql://...
+   PROD_DATABASE_URL:       postgresql://...
+   STAGING_API_URL:         https://...
+   PROD_API_URL:            https://...
+   SLACK_WEBHOOK:           https://hooks.slack.com/... (optional)
    ```
 
-3. Update provider configuration in database
+2. **Deploy to Staging**
 
-## Monitoring & Operations
+   ```bash
+   # Push to main branch
+   git push origin main
+   ```
 
-### View Logs
+   GitHub Actions will:
+   - Run tests
+   - Build Docker images
+   - Push to Artifact Registry
+   - Deploy to Cloud Run
+   - Run smoke tests
 
-```bash
-# Backend logs
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=$BACKEND_SERVICE" --limit 50
+3. **Deploy to Production**
 
-# Frontend logs
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=$FRONTEND_SERVICE" --limit 50
+   ```bash
+   # Create release
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
 
-# Error logs only
-gcloud logging read "resource.type=cloud_run_revision AND severity>=ERROR" --limit 50
-```
+   Or use GitHub UI to create a release.
 
-### Monitor Application
-
-```bash
-# Open Cloud Console
-open "https://console.cloud.google.com/monitoring/dashboards?project=$PROJECT_ID"
-
-# View Cloud Run metrics
-open "https://console.cloud.google.com/run?project=$PROJECT_ID"
-```
-
-### Scale Services
+### Option 2: Cloud Build
 
 ```bash
-# Increase max instances
-gcloud run services update $BACKEND_SERVICE \
-  --region $REGION \
-  --max-instances 20
-
-# Set minimum instances (reduce cold starts)
-gcloud run services update $BACKEND_SERVICE \
-  --region $REGION \
-  --min-instances 1
+# Submit build
+gcloud builds submit \
+  --config=infra/cloudbuild.yaml \
+  --substitutions=_ENVIRONMENT=dev,_REGION=us-central1
 ```
 
-## Cost Optimization
-
-### Development Environment
+### Option 3: Manual Deployment
 
 ```bash
-# Use smaller database tier
-terraform apply -var="db_tier=db-f1-micro"
+# Build and push images
+export PROJECT_ID="your-project-id"
+export REGION="us-central1"
+export REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/dev-vwb-docker"
 
-# Reduce min instances to 0
-gcloud run services update $BACKEND_SERVICE --min-instances 0
+# Backend
+docker build -t ${REGISTRY}/backend:latest app/backend
+docker push ${REGISTRY}/backend:latest
+
+# Frontend
+docker build -t ${REGISTRY}/frontend:latest \
+  --build-arg NEXT_PUBLIC_API_URL=${BACKEND_URL} \
+  app/frontend
+docker push ${REGISTRY}/frontend:latest
+
+# Deploy to Cloud Run
+gcloud run deploy dev-vwb-backend \
+  --image=${REGISTRY}/backend:latest \
+  --region=${REGION} \
+  --platform=managed
+
+gcloud run deploy dev-vwb-frontend \
+  --image=${REGISTRY}/frontend:latest \
+  --region=${REGION} \
+  --platform=managed
 ```
 
-### Production Environment
+## Post-Deployment
 
-- Enable BigQuery partitioning and clustering
-- Set GCS lifecycle policies
-- Use committed use discounts for Cloud SQL
-- Configure budget alerts
-
-## Troubleshooting
-
-### Build Failures
+### 1. Run Database Migrations
 
 ```bash
-# Check Cloud Build logs
-gcloud builds list --limit=5
+# Connect via Cloud SQL Proxy
+cloud_sql_proxy -instances=${DB_CONNECTION}=tcp:5432 &
 
-# View specific build
-BUILD_ID=$(gcloud builds list --limit=1 --format='value(id)')
-gcloud builds log $BUILD_ID
+# Run migrations
+cd app/backend
+export DATABASE_URL="postgresql://vwb_app:PASSWORD@localhost:5432/vwb"
+alembic upgrade head
 ```
 
-### Database Connection Issues
+### 2. Create Admin User
 
 ```bash
-# Verify VPC connector
-gcloud compute networks vpc-access connectors describe vwb-vpc-cx \
-  --region $REGION
+# SSH into Cloud Run instance or run locally
+python -c "
+from app.models import User
+from app.database import SessionLocal
+from passlib.hash import bcrypt
 
-# Test database connectivity
-gcloud sql connect vwb-db --user=vwb_app
+db = SessionLocal()
+admin = User(
+    email='admin@yourcompany.com',
+    hashed_password=bcrypt.hash('your-secure-password'),
+    is_admin=True
+)
+db.add(admin)
+db.commit()
+"
 ```
 
-### Authentication Errors
+### 3. Verify Deployment
 
 ```bash
-# Verify service account permissions
-gcloud projects get-iam-policy $PROJECT_ID \
-  --flatten="bindings[].members" \
-  --filter="bindings.members:serviceAccount:*vwb*"
+# Health checks
+curl ${BACKEND_URL}/health
+curl ${BACKEND_URL}/ready
+
+# API docs
+open ${BACKEND_URL}/docs
+
+# Frontend
+open ${FRONTEND_URL}
 ```
 
-### Document AI Errors
+### 4. Set Up Monitoring
+
+- **Cloud Logging**: Logs are automatically sent to Cloud Logging
+- **Cloud Monitoring**: Dashboards are automatically created
+- **Alerts**: Email alerts configured via Terraform
+
+View in GCP Console:
+- [Cloud Run](https://console.cloud.google.com/run)
+- [Cloud Logging](https://console.cloud.google.com/logs)
+- [Cloud Monitoring](https://console.cloud.google.com/monitoring)
+
+## Scaling Configuration
+
+### Auto-scaling (Cloud Run)
+
+Already configured via Terraform:
+- **Dev**: 0-10 instances
+- **Staging**: 0-20 instances  
+- **Prod**: 1-100 instances (always warm)
+
+### Database Scaling
 
 ```bash
-# Check processor status
-gcloud alpha documentai processors list --location=us
+# Upgrade database tier
+gcloud sql instances patch ${INSTANCE_NAME} \
+  --tier=db-n1-standard-4
 
-# Verify API is enabled
-gcloud services list --enabled | grep documentai
+# Add read replicas (prod only)
+gcloud sql instances create ${INSTANCE_NAME}-replica \
+  --master-instance-name=${INSTANCE_NAME} \
+  --region=${REGION}
 ```
-
-## Security Hardening (Production)
-
-1. **Enable Cloud Armor**: DDoS protection
-2. **Set up Cloud IAP**: Identity-Aware Proxy for admin access
-3. **Configure VPC Service Controls**: Perimeter security
-4. **Enable Binary Authorization**: Ensure only verified images deploy
-5. **Set up SOC 2 compliance**: Audit logging, access controls
-6. **Regular vulnerability scanning**: Container Analysis
 
 ## Backup & Disaster Recovery
 
 ### Database Backups
 
-```bash
-# Backups are automatic, but you can create manual backup
-gcloud sql backups create --instance=vwb-db
+Automated backups configured via Terraform:
+- **Daily backups** at 3 AM
+- **7-day** transaction log retention
+- **30-day** backup retention
 
+Manual backup:
+```bash
+gcloud sql backups create \
+  --instance=${INSTANCE_NAME} \
+  --description="Manual backup $(date +%Y%m%d)"
+```
+
+### Restore from Backup
+
+```bash
 # List backups
-gcloud sql backups list --instance=vwb-db
+gcloud sql backups list --instance=${INSTANCE_NAME}
+
+# Restore
+gcloud sql backups restore BACKUP_ID \
+  --backup-instance=${INSTANCE_NAME}
 ```
 
-### GCS Bucket Versioning
+## Troubleshooting
 
-Versioning is enabled by Terraform. To restore a file:
+### Cloud Run Service Won't Start
 
 ```bash
-gsutil ls -a gs://YOUR_BUCKET/path/to/file
-gsutil cp gs://YOUR_BUCKET/path/to/file#GENERATION ./restored_file
+# Check logs
+gcloud run services logs read ${SERVICE_NAME} --region=${REGION}
+
+# Check environment variables
+gcloud run services describe ${SERVICE_NAME} --region=${REGION}
+
+# Check IAM permissions
+gcloud run services get-iam-policy ${SERVICE_NAME} --region=${REGION}
 ```
 
-## Cleanup
-
-To destroy all resources:
+### Database Connection Issues
 
 ```bash
-cd infra
-terraform destroy -var="project_id=$PROJECT_ID"
+# Test connection via Cloud SQL Proxy
+cloud_sql_proxy -instances=${DB_CONNECTION}=tcp:5432
 
-# Delete state bucket
-gsutil rm -r gs://${PROJECT_ID}-terraform-state
+# Check Cloud SQL logs
+gcloud sql operations list --instance=${INSTANCE_NAME}
+
+# Verify VPC connector
+gcloud compute networks vpc-access connectors describe \
+  ${VPC_CONNECTOR} --region=${REGION}
 ```
+
+### Document AI Processing Failures
+
+```bash
+# Check processor status
+gcloud alpha documentai processors list --location=us
+
+# Test processor
+gcloud alpha documentai processors process \
+  --processor=${PROCESSOR_ID} \
+  --location=us \
+  --input-document=gs://your-bucket/test.pdf
+```
+
+### Performance Issues
+
+```bash
+# Check Cloud Run metrics
+gcloud run services describe ${SERVICE_NAME} \
+  --region=${REGION} \
+  --format="value(status.traffic)"
+
+# Increase resources
+gcloud run services update ${SERVICE_NAME} \
+  --memory=4Gi \
+  --cpu=4 \
+  --region=${REGION}
+
+# Check database performance
+gcloud sql instances describe ${INSTANCE_NAME}
+```
+
+## Security Best Practices
+
+1. **Secrets Management**
+   - Never commit secrets to git
+   - Use Secret Manager for all sensitive data
+   - Rotate secrets regularly
+
+2. **IAM**
+   - Use service accounts with minimal permissions
+   - Enable Workload Identity for GitHub Actions
+   - Review IAM bindings regularly
+
+3. **Network Security**
+   - Cloud Run services use HTTPS only
+   - Database is private (no public IP)
+   - VPC connector for backend-to-database communication
+
+4. **Data Protection**
+   - Enable encryption at rest (default)
+   - Enable encryption in transit (default)
+   - Configure retention policies
+
+5. **Monitoring**
+   - Set up alerts for errors and anomalies
+   - Monitor costs via billing alerts
+   - Review audit logs regularly
+
+## Cost Optimization
+
+### Estimated Monthly Costs (Dev Environment)
+
+- Cloud Run: $5-20 (pay per use)
+- Cloud SQL (db-f1-micro): $10-15
+- Cloud Storage: $1-5
+- BigQuery: $0-10 (mostly free tier)
+- Document AI: $1.50 per 1000 pages
+- Vertex AI: Pay per use
+- **Total: ~$20-60/month**
+
+### Production Environment
+
+- Cloud Run: $50-200
+- Cloud SQL (db-n1-standard-2): $120-180
+- Other services: $50-100
+- **Total: ~$220-480/month**
+
+### Cost Reduction Tips
+
+1. Scale down dev environments outside business hours
+2. Use committed use discounts for prod
+3. Set budget alerts
+4. Clean up old data regularly
+5. Use Cloud SQL proxy connection pooling
 
 ## Support
 
-- Documentation: `/README.md`
-- API Docs: `https://YOUR_BACKEND_URL/docs`
-- Issues: GitHub Issues
-- Email: support@valuationworkbench.example.com
+- **Documentation**: Check `ARCHITECTURE.md` and `README.md`
+- **Issues**: GitHub Issues
+- **GCP Support**: [Support Console](https://console.cloud.google.com/support)
 
+## Next Steps
+
+1. ✅ Infrastructure deployed
+2. ✅ Application deployed
+3. ⬜ Create sample engagements
+4. ⬜ Train team on platform
+5. ⬜ Set up CI/CD monitoring
+6. ⬜ Configure custom domain
+7. ⬜ Set up staging environment
+8. ⬜ Production readiness review

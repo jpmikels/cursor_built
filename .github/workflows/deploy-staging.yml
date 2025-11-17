@@ -1,0 +1,117 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  ENVIRONMENT: staging
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+      
+      - name: Build and Push Backend
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/staging-vwb-docker/backend:${{ github.sha }} \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/staging-vwb-docker/backend:latest \
+            app/backend
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/staging-vwb-docker/backend:${{ github.sha }}
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/staging-vwb-docker/backend:latest
+      
+      - name: Build and Push Frontend
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/staging-vwb-docker/frontend:${{ github.sha }} \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/staging-vwb-docker/frontend:latest \
+            --build-arg NEXT_PUBLIC_API_URL=${{ secrets.STAGING_API_URL }} \
+            app/frontend
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/staging-vwb-docker/frontend:${{ github.sha }}
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/staging-vwb-docker/frontend:latest
+      
+      - name: Run Database Migrations
+        run: |
+          # Get Cloud SQL connection name
+          DB_INSTANCE=$(gcloud sql instances describe staging-vwb-db --format="value(connectionName)" 2>/dev/null || echo "")
+          
+          if [ -n "$DB_INSTANCE" ]; then
+            # Run migrations via Cloud SQL Proxy
+            echo "Running database migrations..."
+            docker run --rm \
+              -v $PWD/app/backend:/app \
+              -e DATABASE_URL=${{ secrets.STAGING_DATABASE_URL }} \
+              ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/staging-vwb-docker/backend:${{ github.sha }} \
+              alembic upgrade head
+          else
+            echo "Database instance not found, skipping migrations"
+          fi
+      
+      - name: Deploy Backend to Cloud Run
+        run: |
+          gcloud run deploy staging-vwb-backend \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/staging-vwb-docker/backend:${{ github.sha }} \
+            --platform=managed \
+            --region=${{ env.REGION }} \
+            --allow-unauthenticated \
+            --set-env-vars="ENVIRONMENT=staging" \
+            --min-instances=0 \
+            --max-instances=10 \
+            --memory=2Gi \
+            --cpu=2 \
+            --timeout=600
+      
+      - name: Deploy Frontend to Cloud Run
+        run: |
+          gcloud run deploy staging-vwb-frontend \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/staging-vwb-docker/frontend:${{ github.sha }} \
+            --platform=managed \
+            --region=${{ env.REGION }} \
+            --allow-unauthenticated \
+            --set-env-vars="NEXT_PUBLIC_ENVIRONMENT=staging" \
+            --min-instances=0 \
+            --max-instances=5 \
+            --memory=512Mi \
+            --cpu=1
+      
+      - name: Run Smoke Tests
+        run: |
+          BACKEND_URL=$(gcloud run services describe staging-vwb-backend --region=${{ env.REGION }} --format="value(status.url)")
+          echo "Testing backend at: $BACKEND_URL"
+          
+          # Health check
+          curl -f $BACKEND_URL/health || exit 1
+          
+          # Ready check
+          curl -f $BACKEND_URL/ready || exit 1
+      
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Staging deployment ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
