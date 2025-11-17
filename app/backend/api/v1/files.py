@@ -1,9 +1,11 @@
 """API endpoints for file upload and processing."""
 import logging
+import uuid
+import json
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
-from google.cloud import storage
+from google.cloud import storage, pubsub_v1
 from pydantic import BaseModel
 
 from database import get_db
@@ -47,7 +49,6 @@ async def get_upload_urls(
         urls = []
         for file_info in request.files:
             # Generate unique file ID
-            import uuid
             file_id = str(uuid.uuid4())
             
             # Create blob path: engagements/{engagement_id}/uploads/{file_id}/{filename}
@@ -93,8 +94,6 @@ async def process_files(
     3. AI-powered mapping to canonical COA
     """
     try:
-        from google.cloud import pubsub_v1
-        
         publisher = pubsub_v1.PublisherClient()
         topic_path = publisher.topic_path(settings.project_id, settings.pubsub_topic_ingestion)
         
@@ -105,7 +104,6 @@ async def process_files(
             "action": "process_documents"
         }
         
-        import json
         future = publisher.publish(
             topic_path,
             json.dumps(message_data).encode("utf-8")

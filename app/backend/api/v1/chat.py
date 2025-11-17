@@ -225,8 +225,8 @@ async def _save_message(
 
 def _generate_conversation_id() -> str:
     """Generate unique conversation ID."""
-    import uuid
-    return str(uuid.uuid4())
+    from uuid import uuid4
+    return str(uuid4())
 
 
 def _generate_suggestions(message: str, context: dict) -> List[str]:

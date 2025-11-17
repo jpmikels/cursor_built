@@ -8,7 +8,7 @@ interface Mapping {
   source_name: string;
   target_id: string;
   target_name: string;
-  confidence: float;
+  confidence: number;
   reasoning: string;
   status: string;
 }

@@ -16,8 +16,13 @@ class DocumentIntelligenceService:
         self.project_id = settings.project_id
         self.location = settings.document_ai_location
         self.processor_id = settings.document_ai_processor_id
-        self.client = documentai.DocumentProcessorServiceClient()
-        self.storage_client = storage.Client()
+        try:
+            self.client = documentai.DocumentProcessorServiceClient()
+            self.storage_client = storage.Client()
+        except Exception as e:
+            logger.warning(f"Could not initialize Document AI service: {e}")
+            self.client = None
+            self.storage_client = None
     
     def _get_processor_name(self) -> str:
         """Get the full processor resource name."""
@@ -42,6 +47,10 @@ class DocumentIntelligenceService:
         Returns:
             Extracted document data with text, tables, and entities
         """
+        if not self.client or not self.storage_client:
+            logger.warning("Document AI not initialized, returning empty result")
+            return {"text": "", "pages": 0, "tables": [], "entities": [], "confidence": 0.0}
+        
         try:
             # Parse GCS URI
             if not gcs_uri.startswith("gs://"):

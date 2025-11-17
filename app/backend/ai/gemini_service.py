@@ -15,11 +15,15 @@ class GeminiService:
     
     def __init__(self):
         """Initialize Gemini service."""
-        aiplatform.init(
-            project=settings.project_id,
-            location=settings.vertex_ai_location
-        )
-        self.model = GenerativeModel(settings.vertex_ai_model)
+        try:
+            aiplatform.init(
+                project=settings.project_id,
+                location=settings.vertex_ai_location
+            )
+            self.model = GenerativeModel(settings.vertex_ai_model)
+        except Exception as e:
+            logger.warning(f"Could not initialize Gemini service: {e}. Service will run in mock mode.")
+            self.model = None
     
     async def map_to_coa(
         self,

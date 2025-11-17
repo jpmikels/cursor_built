@@ -1,11 +1,13 @@
 """API endpoints for valuation workbook generation."""
 import logging
+import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from io import BytesIO
+from google.cloud import storage
 
 from database import get_db
 from config import settings
@@ -58,11 +60,9 @@ async def generate_workbook(
         workbook_bytes = generator.generate()
         
         # Upload to Cloud Storage
-        from google.cloud import storage
         storage_client = storage.Client()
         bucket = storage_client.bucket(settings.artifacts_bucket)
         
-        import uuid
         workbook_id = str(uuid.uuid4())
         blob_name = f"engagements/{engagement_id}/workbooks/{workbook_id}.xlsx"
         blob = bucket.blob(blob_name)
@@ -102,7 +102,6 @@ async def download_workbook(
 ):
     """Download a previously generated workbook."""
     try:
-        from google.cloud import storage
         storage_client = storage.Client()
         bucket = storage_client.bucket(settings.artifacts_bucket)
         
@@ -135,7 +134,6 @@ async def list_workbooks(
 ):
     """List all workbooks generated for an engagement."""
     try:
-        from google.cloud import storage
         storage_client = storage.Client()
         bucket = storage_client.bucket(settings.artifacts_bucket)
         
